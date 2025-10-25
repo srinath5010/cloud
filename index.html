@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Library System (No Auth)</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7fafc;
+        }
+        .card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                        0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e2e8f0;
+        }
+        .btn {
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+        .btn-primary {
+            background-color: #4f46e5;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #4338ca;
+        }
+        .btn-danger {
+            background-color: #ef4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background-color: #dc2626;
+        }
+        .btn-success {
+            background-color: #22c55e;
+            color: white;
+        }
+        .btn-success:hover {
+            background-color: #16a34a;
+        }
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen flex flex-col items-center justify-start p-4 bg-gray-100">
+    <div class="card bg-white p-8 rounded-xl w-full max-w-4xl mt-8">
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-2 text-center">📚 Cloud Library System</h1>
+        <p class="text-center text-gray-500 mb-6">Manage your books inventory in real-time with Firestore (no auth).</p>
+
+        <!-- Add New Book Form -->
+        <div class="border-t pt-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Add New Book</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <input type="text" id="book-title-input" placeholder="Book Title"
+                       class="col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                       maxlength="100">
+                <input type="text" id="book-author-input" placeholder="Author Name"
+                       class="col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                       maxlength="100">
+                <button id="add-book-btn" class="btn btn-primary w-full">
+                    Add Book
+                </button>
+            </div>
+        </div>
+
+        <!-- Book List Table -->
+        <h2 class="text-xl font-semibold text-gray-700 mb-3">Current Inventory</h2>
+        <div class="overflow-x-auto shadow-md rounded-lg">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-indigo-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title / Author</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="book-list-body" class="bg-white divide-y divide-gray-200">
+                    <!-- Books inserted dynamically -->
+                </tbody>
+            </table>
+            <div id="loading-indicator" class="p-4 text-center text-gray-500 hidden">Loading books...</div>
+            <div id="empty-list-message" class="p-4 text-center text-gray-500 hidden">No books found. Add one above!</div>
+        </div>
+
+        <p id="status-text" class="text-center text-sm mt-4 text-red-500 hidden"></p>
+    </div>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import {
+        getFirestore, doc, onSnapshot, collection,
+        addDoc, updateDoc, deleteDoc, getDoc
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // ✅ Your Firebase configuration
+    const firebaseConfig = {
+        apiKey: "AIzaSyAPqO5ZAfaw9meJ6KTo0tBZ8CDKoho3I6c",
+        authDomain: "cloud-46bef.firebaseapp.com",
+        projectId: "cloud-46bef",
+        storageBucket: "cloud-46bef.firebasestorage.app",
+        messagingSenderId: "711472503921",
+        appId: "1:711472503921:web:6fe77a476c50a3fed44fd0",
+        measurementId: "G-D7WMF98CMQ"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const appId = 'cloud-46bef';
+    const BOOKS_COLLECTION_PATH = `/artifacts/${appId}/public/data/books`;
+
+    // UI Elements
+    const titleInputEl = document.getElementById('book-title-input');
+    const authorInputEl = document.getElementById('book-author-input');
+    const addBookBtn = document.getElementById('add-book-btn');
+    const bookListBodyEl = document.getElementById('book-list-body');
+    const loadingIndicatorEl = document.getElementById('loading-indicator');
+    const emptyListMessageEl = document.getElementById('empty-list-message');
+    const statusTextEl = document.getElementById('status-text');
+
+    // Listen for Firestore updates
+    function listenForBooks() {
+        loadingIndicatorEl.classList.remove('hidden');
+        const collectionRef = collection(db, BOOKS_COLLECTION_PATH);
+
+        onSnapshot(collectionRef, (snapshot) => {
+            const books = [];
+            snapshot.forEach(doc => books.push({ id: doc.id, ...doc.data() }));
+            books.sort((a, b) => a.title.localeCompare(b.title));
+            renderBooks(books);
+            loadingIndicatorEl.classList.add('hidden');
+        }, (error) => {
+            displayStatus(`Firestore Error: ${error.message}`, 'text-red-500');
+            console.error(error);
+        });
+    }
+
+    function renderBooks(books) {
+        bookListBodyEl.innerHTML = '';
+        if (books.length === 0) {
+            emptyListMessageEl.classList.remove('hidden');
+            return;
+        }
+        emptyListMessageEl.classList.add('hidden');
+
+        books.forEach(book => {
+            const isBorrowed = book.isBorrowed || false;
+            const statusText = isBorrowed ? 'Borrowed' : 'Available';
+            const statusClass = isBorrowed ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+            const toggleBtnText = isBorrowed ? 'Mark Available' : 'Mark Borrowed';
+            const toggleBtnClass = isBorrowed ? 'btn-success' : 'btn-primary';
+
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50';
+            row.innerHTML = `
+                <td class="px-6 py-4">
+                    <div class="font-bold">${book.title}</div>
+                    <div class="text-gray-500 text-xs">by ${book.author}</div>
+                    <div class="status-pill ${statusClass} mt-1 sm:hidden">${statusText}</div>
+                </td>
+                <td class="px-6 py-4 hidden sm:table-cell">
+                    <span class="status-pill ${statusClass}">${statusText}</span>
+                </td>
+                <td class="px-6 py-4 space-x-2">
+                    <button data-id="${book.id}" data-action="toggle" class="btn text-xs ${toggleBtnClass}">
+                        ${toggleBtnText}
+                    </button>
+                    <button data-id="${book.id}" data-action="delete" class="btn btn-danger text-xs">
+                        Delete
+                    </button>
+                </td>`;
+            bookListBodyEl.appendChild(row);
+        });
+    }
+
+    // Add new book
+    async function addBook() {
+        const title = titleInputEl.value.trim();
+        const author = authorInputEl.value.trim();
+        if (!title || !author) return displayStatus('Both fields are required.', 'text-red-500');
+
+        addBookBtn.textContent = 'Adding...';
+        addBookBtn.disabled = true;
+
+        try {
+            await addDoc(collection(db, BOOKS_COLLECTION_PATH), {
+                title, author, isBorrowed: false, timestamp: Date.now()
+            });
+            titleInputEl.value = '';
+            authorInputEl.value = '';
+            displayStatus('Book added successfully!', 'text-green-600');
+        } catch (e) {
+            displayStatus(`Add Failed: ${e.message}`, 'text-red-500');
+        } finally {
+            addBookBtn.textContent = 'Add Book';
+            addBookBtn.disabled = false;
+        }
+    }
+
+    // Toggle / Delete Actions
+    async function handleBookAction(event) {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const id = button.dataset.id;
+        const action = button.dataset.action;
+        if (action === 'toggle') toggleBookStatus(id);
+        else if (action === 'delete') deleteBook(id);
+    }
+
+    async function toggleBookStatus(bookId) {
+        const docRef = doc(db, BOOKS_COLLECTION_PATH, bookId);
+        try {
+            const snap = await getDoc(docRef);
+            if (!snap.exists()) return displayStatus('Book not found.', 'text-red-500');
+            const newStatus = !snap.data().isBorrowed;
+            await updateDoc(docRef, { isBorrowed: newStatus, lastUpdate: Date.now() });
+            displayStatus(`Book marked as ${newStatus ? 'Borrowed' : 'Available'}`, 'text-green-600');
+        } catch (e) {
+            displayStatus(`Error: ${e.message}`, 'text-red-500');
+        }
+    }
+
+    async function deleteBook(bookId) {
+        try {
+            await deleteDoc(doc(db, BOOKS_COLLECTION_PATH, bookId));
+            displayStatus('Book deleted.', 'text-green-600');
+        } catch (e) {
+            displayStatus(`Delete failed: ${e.message}`, 'text-red-500');
+        }
+    }
+
+    function displayStatus(msg, color) {
+        statusTextEl.textContent = msg;
+        statusTextEl.className = `text-center text-sm mt-4 ${color}`;
+        statusTextEl.classList.remove('hidden');
+        setTimeout(() => statusTextEl.classList.add('hidden'), 3000);
+    }
+
+    // Initialize
+    addBookBtn.addEventListener('click', addBook);
+    bookListBodyEl.addEventListener('click', handleBookAction);
+    listenForBooks();
+</script>
+
+</body>
+</html>
